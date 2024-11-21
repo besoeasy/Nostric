@@ -1,34 +1,98 @@
-const { generateSecretKey, getPublicKey, finalizeEvent, verifyEvent } = require("nostr-tools/pure");
-const { Relay } = require("nostr-tools/relay");
+const {
+  generateSecretKey,
+  getPublicKey,
+  finalizeEvent,
+  verifyEvent,
+} = require("nostr-tools/pure");
 
-async function sendLog(sk, message, recipientPublicKey) {
-  let event = finalizeEvent(
+const WebSocket = require("ws"); // Import the 'ws' package for WebSocket support
+
+// Constants
+const RELAY_URL = "wss://nos.lol"; // Relay to connect to
+
+/**
+ * Helper to wait for WebSocket events using Promises
+ * @param {WebSocket} socket
+ * @param {string} event
+ * @returns {Promise}
+ */
+function waitForSocketEvent(socket, event) {
+  return new Promise((resolve, reject) => {
+    if (event === "error") {
+      socket.on("error", reject);
+    } else {
+      socket.on(event, resolve);
+    }
+  });
+}
+
+/**
+ * Create and finalize a Nostr event
+ * @param {string} sk - Sender's secret key
+ * @param {string} message - Message content
+ * @param {string} recipientPublicKey - Recipient's public key
+ * @returns {object} - Finalized Nostr event
+ */
+function createEvent(sk, message, recipientPublicKey) {
+  const event = finalizeEvent(
     {
-      kind: 1,
+      kind: 1, // Kind 1 is typically used for "text" events
       created_at: Math.floor(Date.now() / 1000),
-      tags: [["p", recipientPublicKey]],
+      tags: [["p", recipientPublicKey]], // Add a tag pointing to the recipient's public key
       content: message,
     },
     sk
   );
 
-  let isGood = verifyEvent(event);
-  console.log("Event verification:", isGood);
+  if (!verifyEvent(event)) {
+    throw new Error("Event verification failed.");
+  }
 
-  const relay = await Relay.connect("wss://relay.damus.io");
-
-  await relay.publish(event);
-  console.log("Log sent!");
-
-  relay.close();
+  console.log("Event created and verified:", event);
+  return event;
 }
 
-// Generate secret and public keys
+/**
+ * Send a Nostr log message
+ * @param {string} sk - Sender's secret key
+ * @param {string} message - Message content
+ * @param {string} recipientPublicKey - Recipient's public key
+ */
+async function sendLog(sk, message, recipientPublicKey) {
+  const event = createEvent(sk, message, recipientPublicKey);
+
+  // Connect to the relay
+  const relay = new WebSocket(RELAY_URL);
+
+  try {
+    console.log("Connecting to relay...");
+
+    // Wait for WebSocket to open
+    await waitForSocketEvent(relay, "open");
+
+    console.log("Connected to relay. Sending log...");
+    relay.send(JSON.stringify(["EVENT", event]));
+
+    console.log("Log sent successfully!");
+  } catch (error) {
+    console.error("Failed to send log:", error.message);
+  } finally {
+    // Gracefully close the relay connection
+    if (relay.readyState === WebSocket.OPEN) {
+      relay.close();
+      console.log("Relay connection closed.");
+    }
+  }
+}
+
+// Generate sender's secret key
 const sk = generateSecretKey();
-const pk = getPublicKey(sk);
 
 // Replace with actual recipient's public key
-const recipientPk = "npub176qdmkxp8uww4wfwm56ftu8uuarmhqxzwrsgr7qvwsqma7mzmf7qu9ktln";
+const recipientPk = "npub19r9egcyrrsdulr2q4vyy7jzq5n53fj6rupnp9xrh9c24t23wt9lqdk7sc6";
+
+// Message to send
 const message = "Hello from Nostric!";
 
-sendLog(sk, message, recipientPk).catch((err) => console.error(err));
+// Send the log
+sendLog(sk, message, recipientPk).catch((err) => console.error("Unhandled error:", err.message));
