@@ -1,44 +1,34 @@
-const { generateSecretKey, getPublicKey, signEvent } = require("nostr-tools");
-const WebSocket = require("ws");
+const { generateSecretKey, getPublicKey, finalizeEvent, verifyEvent } = require("nostr-tools/pure");
+const { Relay } = require("nostr-tools/relay");
 
-const nostr_relays = [
-  "wss://relay.damus.io", // Public relay
-  "wss://nostr-pub.wellorder.net", // Another public relay
-  "wss://relay.nostr.info", // Example relay
-  
-];
+async function sendLog(sk, message, recipientPublicKey) {
+  let event = finalizeEvent(
+    {
+      kind: 1,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [["p", recipientPublicKey]],
+      content: message,
+    },
+    sk
+  );
 
-async function sendLog(privateKey, relays, message, recipientPublicKey) {
-  const event = {
-    kind: 1, // Kind 1 is typically used for "text" events
-    created_at: Math.floor(Date.now() / 1000),
-    tags: [["p", recipientPublicKey]], // Add a tag pointing to the recipient's public key
-    content: message,
-    pubkey: getPublicKey(privateKey), // Get the public key of the sender
-  };
+  let isGood = verifyEvent(event);
+  console.log("Event verification:", isGood);
 
-  // Sign the event (this finalizes it)
-  const signedEvent = signEvent(event, privateKey);
+  const relay = await Relay.connect("wss://relay.damus.io");
 
-  // Publish the event to all relays
-  for (const relay of relays) {
-    const relayConnection = new WebSocket(relay);
+  await relay.publish(event);
+  console.log("Log sent!");
 
-    relayConnection.on("open", () => {
-      relayConnection.send(JSON.stringify(["EVENT", signedEvent]));
-      console.log(`Log sent to ${relay}:`, signedEvent);
-    });
-
-    relayConnection.on("error", (error) => {
-      console.error(`Relay connection error (${relay}):`, error);
-    });
-  }
+  relay.close();
 }
 
-// Example usage
-const sk = generateSecretKey(); // Generate sender's secret key
-const pk = getPublicKey(sk); // Generate sender's public key
-const recipientPk = "npub176qdmkxp8uww4wfwm56ftu8uuarmhqxzwrsgr7qvwsqma7mzmf7qu9ktln"; // Replace with the recipient's public key
+// Generate secret and public keys
+const sk = generateSecretKey();
+const pk = getPublicKey(sk);
+
+// Replace with actual recipient's public key
+const recipientPk = "npub176qdmkxp8uww4wfwm56ftu8uuarmhqxzwrsgr7qvwsqma7mzmf7qu9ktln";
 const message = "Hello from Nostric!";
 
-sendLog(sk, nostr_relays, message, recipientPk);
+sendLog(sk, message, recipientPk).catch((err) => console.error(err));
